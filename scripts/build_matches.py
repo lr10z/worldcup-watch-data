@@ -15,8 +15,11 @@ Usage:
     python3 build_matches.py                # fetch openfootball, update matches.json
     python3 build_matches.py <local.json>   # use a local openfootball file (testing)
 
-Writes matches.json only when the resolved set actually changes, so a scheduled
-run that finds nothing new produces no diff (and so no pull request).
+Merges resolved knockout teams INTO the existing matches.json rather than
+replacing it: hand-added entries (e.g. a kickoff reschedule typed in from a
+phone) and any kickoff field are preserved, and nothing is ever deleted. Writes
+only when the merged result actually changes, so a run that finds nothing new
+produces no diff (and so no pull request).
 """
 
 import datetime
@@ -93,31 +96,74 @@ def load_openfootball():
         return json.loads(resp.read().decode("utf-8"))
 
 
-def existing_matches():
+def load_existing():
+    """Return the whole current matches.json payload as a dict, or None if it's
+    missing or unreadable. We read the full payload (not just "matches") so we
+    can preserve the existing top-level "version" when we write."""
     try:
         with open(OUT_PATH, encoding="utf-8") as f:
-            return json.load(f).get("matches", {})
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
     except (FileNotFoundError, ValueError):
         return None
 
 
+def merge(existing, resolved):
+    """Overlay resolved knockout team names onto the existing matches.
+
+    The writer owns ONLY the team names (t1/t2) of resolved knockout games.
+    Everything else in the file belongs to whoever hand-edited it (e.g. a
+    kickoff reschedule typed in from a phone), so we:
+      - keep every existing entry and never delete one;
+      - for a resolved game, set t1/t2 but preserve any other fields already on
+        that entry (notably kickoff).
+    """
+    merged = dict(existing)  # shallow copy keeps every hand-added entry as-is
+    for mid, teams in resolved.items():
+        current = merged.get(mid)
+        if isinstance(current, dict):
+            entry = dict(current)          # preserve kickoff & any other fields
+            entry["t1"] = teams["t1"]
+            entry["t2"] = teams["t2"]
+            merged[mid] = entry
+        else:
+            merged[mid] = {"t1": teams["t1"], "t2": teams["t2"]}
+    return merged
+
+
+def _match_sort_key(item):
+    # Numeric match ids in numeric order; anything unexpected sorts last so a
+    # stray key can never crash the run.
+    key = item[0]
+    if isinstance(key, str) and key.isdigit():
+        return (0, int(key), "")
+    return (1, 0, str(key))
+
+
 def main():
     resolved = build_matches(load_openfootball())
-    resolved = dict(sorted(resolved.items(), key=lambda kv: int(kv[0])))
 
-    if resolved == existing_matches():
+    existing = load_existing()
+    have_valid_file = existing is not None and isinstance(existing.get("matches"), dict)
+    existing_matches = existing["matches"] if have_valid_file else {}
+
+    merged = dict(sorted(merge(existing_matches, resolved).items(), key=_match_sort_key))
+
+    if have_valid_file and merged == existing_matches:
         print(f"No change ({len(resolved)} resolved knockout game(s)); matches.json left as is.")
         return
 
+    version = existing["version"] if (existing is not None and isinstance(existing.get("version"), int)) else 1
     payload = {
-        "version": 1,
+        "version": version,
         "updated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "matches": resolved,
+        "matches": merged,
     }
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"Updated matches.json: {len(resolved)} resolved knockout game(s).")
+    print(f"Updated matches.json: {len(resolved)} resolved knockout game(s) merged; "
+          f"{len(merged)} total entr{'y' if len(merged) == 1 else 'ies'}.")
 
 
 if __name__ == "__main__":
