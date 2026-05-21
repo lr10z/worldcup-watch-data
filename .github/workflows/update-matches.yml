@@ -1,0 +1,37 @@
+name: Update matches
+
+# Runs on a schedule (and on demand) to pull resolved knockout teams from
+# openfootball into matches.json, opening a pull request for review. The watch
+# face fetches matches.json, so a merged PR is what reaches the watches.
+
+on:
+  schedule:
+    # Every 6 hours, off the hour (GitHub delays on-the-hour schedules under load).
+    - cron: "23 */6 * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write          # commit the regenerated file to a branch
+  pull-requests: write     # open the PR
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate matches.json from openfootball
+        run: python3 scripts/build_matches.py
+
+      - name: Open a pull request if anything changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: auto/update-matches
+          delete-branch: true
+          commit-message: "Update matches.json from openfootball"
+          title: "Update resolved matches"
+          body: |
+            Auto-generated from openfootball results.
+
+            Review the team changes in the diff, then merge to push them to the
+            watches. If nothing looks resolved yet, it's safe to close.
