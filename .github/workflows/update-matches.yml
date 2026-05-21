@@ -18,13 +18,13 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Regenerate matches.json from openfootball
         run: python3 scripts/build_matches.py
 
       - name: Open a pull request if anything changed
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: auto/update-matches
           delete-branch: true
