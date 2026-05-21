@@ -1,5 +1,7 @@
 {
   "version": 1,
-  "updated": "2026-05-20T00:00:00Z",
-  "matches": {}
+  "updated": "2026-05-21T00:00:00Z",
+  "matches": {
+    "1": { "t1": "Mexico", "t2": "Brazil" }
+  }
 }
