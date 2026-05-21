@@ -7,7 +7,7 @@ name: Update matches
 on:
   schedule:
     # Every 6 hours, off the hour (GitHub delays on-the-hour schedules under load).
-    - cron: "23 */6 * * *"
+    - cron: "23 */3 * * *"
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
 permissions:
