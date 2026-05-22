@@ -6,8 +6,8 @@ name: Update matches
 
 on:
   schedule:
-    # Every hour, off the hour (GitHub delays on-the-hour schedules under load).
-    - cron: "23 * * * *"
+    # Every 30 minutes, off the hour (GitHub delays on-the-hour schedules under load).
+    - cron: "23,53 * * * *"
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
 permissions:
