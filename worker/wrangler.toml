@@ -1,0 +1,31 @@
+name = "garmin-watchface-wc-game-status"
+main = "src/index.js"
+compatibility_date = "2026-05-26"
+
+# Cron fires every 10 minutes. The Worker's scheduled handler decides whether to
+# actually call api-football, based on a baked-in kickoff schedule — outside live
+# windows it returns immediately, so the API quota only burns during matches.
+#
+# 10-min cadence keeps us under api-football's 100/day free tier even on peak
+# 4-match days (~62 calls vs the 100 cap). The watch's displayed match minute
+# is up to 10 min stale; that's the trade-off for staying free. Bumping to
+# */5 or */3 would burn through the quota on busy days; bumping to */15 would
+# make the minute display feel sluggish.
+[triggers]
+crons = ["*/10 * * * *"]
+
+# KV holds the latest status.json payload under a single key. Created once via:
+#   wrangler kv namespace create garmin_wc_game_status_kv
+# Then paste the printed id here.
+[[kv_namespaces]]
+binding = "GARMIN_WC_GAME_STATUS_KV"
+id = "3fe5c48bcaf543d180f48719cfdbb69e"
+
+# api-football league ID for the senior men's World Cup. The 2026 edition is the
+# `year: 2026` season under this league. Verified via the /leagues?search=world%20cup
+# lookup on 2026-05-27 — id=1, country="World".
+[vars]
+WC_LEAGUE_ID = "1"
+
+# The api-football API key is stored as a secret (not in this file) via:
+#   wrangler secret put API_FOOTBALL_KEY
