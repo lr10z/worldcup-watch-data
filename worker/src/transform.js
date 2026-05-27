@@ -140,29 +140,54 @@ export function fixtureToMatchId(fx) {
   return null;
 }
 
+// Merge a fresh map of `matchId -> entry` with the previously-stored map,
+// preserving `asOfUtc` on matches that were already in `fulltime`. This is
+// what powers the watch face's 10-minute FT-grace timer: we need to remember
+// when each match FIRST entered FT, not just that it's still in FT now.
+//
+// Pure (no I/O); the Worker's scheduled handler is responsible for actually
+// reading + writing KV.
+export function mergeWithPrevious(newMatches, oldMatches, now) {
+  const merged = {};
+  const old = oldMatches || {};
+  for (const matchId in newMatches) {
+    const entry = newMatches[matchId];
+    if (entry.state === "fulltime") {
+      const prev = old[matchId];
+      const preservedAt = prev && prev.state === "fulltime" && typeof prev.asOfUtc === "number"
+        ? prev.asOfUtc
+        : now;
+      merged[matchId] = { state: "fulltime", asOfUtc: preservedAt };
+    } else {
+      merged[matchId] = entry;
+    }
+  }
+  return merged;
+}
+
 // Translate api-football's short status code into our state machine entry.
 // The set of codes that matter for the live UI is below; anything else (NS
 // pre-kickoff, PST/CANC, unknown) returns null so it's dropped from the
 // payload and the watch falls back to its 2-hour-window LIVE logic.
 //
-// `now` is the Unix timestamp at which the fetch happened — stamped onto
-// live/extratime entries so the watch can extrapolate the minute forward
-// between fetches.
+// State-only — no minute, no asOfUtc. The face shows just the phase code
+// (1H / 2H / HT / ET / PEN / FT) so we don't need minute-level freshness from
+// the upstream API. Keeps quota usage low and removes minute-extrapolation
+// logic on the watch entirely. `now` arg kept on the signature for future
+// flexibility but currently unused.
 export function buildStatusEntry(fx, now) {
   const status = fx && fx.fixture && fx.fixture.status;
   if (!status) return null;
-  const short = status.short;
-  const elapsed = typeof status.elapsed === "number" ? status.elapsed : null;
-  switch (short) {
+  switch (status.short) {
     case "1H":   // first half
-      return { state: "firstHalf", minute: elapsed != null ? elapsed : 0, asOfUtc: now };
+      return { state: "firstHalf" };
     case "2H":   // second half
-      return { state: "secondHalf", minute: elapsed != null ? elapsed : 46, asOfUtc: now };
+      return { state: "secondHalf" };
     case "HT":   // halftime
       return { state: "halftime" };
     case "ET":   // extra time playing
     case "BT":   // break between extra-time halves
-      return { state: "extratime", minute: elapsed != null ? elapsed : 90, asOfUtc: now };
+      return { state: "extratime" };
     case "P":    // penalty shootout in progress
       return { state: "penalties" };
     case "FT":   // full time

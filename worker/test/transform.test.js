@@ -9,7 +9,8 @@ import {
   POST_KICKOFF_S,
   anyMatchActive,
   fixtureToMatchId,
-  buildStatusEntry
+  buildStatusEntry,
+  mergeWithPrevious
 } from "../src/transform.js";
 
 // ---------- anyMatchActive ----------
@@ -76,56 +77,43 @@ test("fixtureToMatchId: timestamp matching the Final returns 104", () => {
 
 
 // ---------- buildStatusEntry ----------
+// State-only contract — no minute, no asOfUtc. The face shows just the phase
+// code, so the upstream elapsed value isn't needed in the payload.
 
-const NOW = 1781208000;   // arbitrary "now" inside the opener window for asOfUtc
+const NOW = 1781208000;   // arbitrary "now"; passed in but currently unused
 
 function fx(short, elapsed) {
   return { fixture: { status: { short, elapsed } } };
 }
 
-test("buildStatusEntry: 1H -> firstHalf with elapsed minute", () => {
-  assert.deepEqual(buildStatusEntry(fx("1H", 23), NOW),
-                   { state: "firstHalf", minute: 23, asOfUtc: NOW });
+test("buildStatusEntry: 1H -> firstHalf", () => {
+  assert.deepEqual(buildStatusEntry(fx("1H", 23), NOW), { state: "firstHalf" });
 });
 
-test("buildStatusEntry: 2H -> secondHalf with elapsed minute", () => {
-  assert.deepEqual(buildStatusEntry(fx("2H", 67), NOW),
-                   { state: "secondHalf", minute: 67, asOfUtc: NOW });
+test("buildStatusEntry: 2H -> secondHalf", () => {
+  assert.deepEqual(buildStatusEntry(fx("2H", 67), NOW), { state: "secondHalf" });
 });
 
-test("buildStatusEntry: 1H with missing elapsed defaults to 0", () => {
-  assert.deepEqual(buildStatusEntry(fx("1H", null), NOW),
-                   { state: "firstHalf", minute: 0, asOfUtc: NOW });
+test("buildStatusEntry: 1H ignores elapsed", () => {
+  // No minute in output regardless of input.
+  assert.deepEqual(buildStatusEntry(fx("1H", null), NOW), { state: "firstHalf" });
+  assert.deepEqual(buildStatusEntry(fx("1H", 47), NOW),   { state: "firstHalf" });
 });
 
-test("buildStatusEntry: 2H with missing elapsed defaults to 46", () => {
-  assert.deepEqual(buildStatusEntry(fx("2H", null), NOW),
-                   { state: "secondHalf", minute: 46, asOfUtc: NOW });
+test("buildStatusEntry: HT -> halftime", () => {
+  assert.deepEqual(buildStatusEntry(fx("HT", 45), NOW), { state: "halftime" });
 });
 
-test("buildStatusEntry: HT -> halftime, no minute, no asOfUtc", () => {
-  assert.deepEqual(buildStatusEntry(fx("HT", 45), NOW),
-                   { state: "halftime" });
-});
-
-test("buildStatusEntry: ET -> extratime with elapsed minute", () => {
-  assert.deepEqual(buildStatusEntry(fx("ET", 105), NOW),
-                   { state: "extratime", minute: 105, asOfUtc: NOW });
+test("buildStatusEntry: ET -> extratime", () => {
+  assert.deepEqual(buildStatusEntry(fx("ET", 105), NOW), { state: "extratime" });
 });
 
 test("buildStatusEntry: BT (break) -> extratime", () => {
-  assert.deepEqual(buildStatusEntry(fx("BT", 105), NOW),
-                   { state: "extratime", minute: 105, asOfUtc: NOW });
+  assert.deepEqual(buildStatusEntry(fx("BT", 105), NOW), { state: "extratime" });
 });
 
-test("buildStatusEntry: ET with missing elapsed defaults to 90", () => {
-  assert.deepEqual(buildStatusEntry(fx("ET", null), NOW),
-                   { state: "extratime", minute: 90, asOfUtc: NOW });
-});
-
-test("buildStatusEntry: P -> penalties, no minute", () => {
-  assert.deepEqual(buildStatusEntry(fx("P", 120), NOW),
-                   { state: "penalties" });
+test("buildStatusEntry: P -> penalties", () => {
+  assert.deepEqual(buildStatusEntry(fx("P", 120), NOW), { state: "penalties" });
 });
 
 test("buildStatusEntry: FT / AET / PEN all map to fulltime", () => {
@@ -150,4 +138,78 @@ test("buildStatusEntry: missing status returns null", () => {
   assert.equal(buildStatusEntry({ fixture: {} }, NOW), null);
   assert.equal(buildStatusEntry({}, NOW), null);
   assert.equal(buildStatusEntry(null, NOW), null);
+});
+
+
+// ---------- mergeWithPrevious (FT asOfUtc preservation) ----------
+
+test("mergeWithPrevious: new FT entry gets asOfUtc = now", () => {
+  const fresh = { "1": { state: "fulltime" } };
+  const merged = mergeWithPrevious(fresh, {}, NOW);
+  assert.deepEqual(merged, { "1": { state: "fulltime", asOfUtc: NOW } });
+});
+
+test("mergeWithPrevious: existing FT preserves original asOfUtc", () => {
+  // Old payload had match 1 at FT, stamped earlier.
+  const earlier = NOW - 5 * 60;
+  const fresh = { "1": { state: "fulltime" } };
+  const old = { "1": { state: "fulltime", asOfUtc: earlier } };
+  const merged = mergeWithPrevious(fresh, old, NOW);
+  assert.deepEqual(merged, { "1": { state: "fulltime", asOfUtc: earlier } });
+});
+
+test("mergeWithPrevious: transition from secondHalf to FT stamps current now", () => {
+  const fresh = { "1": { state: "fulltime" } };
+  const old = { "1": { state: "secondHalf" } };
+  const merged = mergeWithPrevious(fresh, old, NOW);
+  assert.deepEqual(merged, { "1": { state: "fulltime", asOfUtc: NOW } });
+});
+
+test("mergeWithPrevious: non-FT entries are passed through untouched", () => {
+  const fresh = {
+    "1": { state: "firstHalf" },
+    "2": { state: "halftime" },
+    "3": { state: "extratime" }
+  };
+  const merged = mergeWithPrevious(fresh, {}, NOW);
+  assert.deepEqual(merged, fresh);
+});
+
+test("mergeWithPrevious: mixed payload — preserves FT, refreshes others", () => {
+  const earlier = NOW - 3 * 60;
+  const fresh = {
+    "1": { state: "fulltime" },     // already FT in old → preserve
+    "2": { state: "fulltime" },     // newly FT → stamp now
+    "3": { state: "secondHalf" }    // live → pass through
+  };
+  const old = {
+    "1": { state: "fulltime", asOfUtc: earlier },
+    "2": { state: "secondHalf" },
+    "3": { state: "firstHalf" }
+  };
+  const merged = mergeWithPrevious(fresh, old, NOW);
+  assert.deepEqual(merged, {
+    "1": { state: "fulltime", asOfUtc: earlier },
+    "2": { state: "fulltime", asOfUtc: NOW },
+    "3": { state: "secondHalf" }
+  });
+});
+
+test("mergeWithPrevious: old asOfUtc missing or non-numeric → restamp", () => {
+  const fresh = { "1": { state: "fulltime" } };
+  // Defensive against corrupt prior data — should restamp rather than carry junk.
+  assert.deepEqual(
+    mergeWithPrevious(fresh, { "1": { state: "fulltime" } }, NOW),
+    { "1": { state: "fulltime", asOfUtc: NOW } }
+  );
+  assert.deepEqual(
+    mergeWithPrevious(fresh, { "1": { state: "fulltime", asOfUtc: "oops" } }, NOW),
+    { "1": { state: "fulltime", asOfUtc: NOW } }
+  );
+});
+
+test("mergeWithPrevious: null oldMatches treated as empty", () => {
+  const fresh = { "1": { state: "fulltime" } };
+  const merged = mergeWithPrevious(fresh, null, NOW);
+  assert.deepEqual(merged, { "1": { state: "fulltime", asOfUtc: NOW } });
 });
