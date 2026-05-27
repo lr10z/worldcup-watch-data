@@ -7,6 +7,10 @@
 //
 // Output payload (consumed by the watch face's Status module):
 //   { lastFetchedUtc: <int>,
+//     apiQuotaRemaining?: <int>,         // api-football daily-quota remaining,
+//                                        // populated on cron ticks that hit
+//                                        // the upstream; absent otherwise.
+//                                        // Read by the health-check workflow.
 //     matches: {
 //       "<matchId>": { state: "firstHalf"|"secondHalf"|"halftime"|"extratime"|"penalties"|"fulltime",
 //                      asOfUtc?: <int>   // only on fulltime — first-FT timestamp for the 10-min grace
@@ -53,6 +57,7 @@ export default {
 
     const url = `https://v3.football.api-sports.io/fixtures?live=all&league=${env.WC_LEAGUE_ID}`;
     let data;
+    let apiQuotaRemaining = null;
     try {
       const resp = await fetch(url, {
         headers: { "x-apisports-key": env.API_FOOTBALL_KEY }
@@ -60,6 +65,17 @@ export default {
       if (!resp.ok) {
         console.log(`api-football returned HTTP ${resp.status} — skipping write`);
         return;
+      }
+      // api-football returns the daily remaining-quota in this header on every
+      // response (free tier: starts at 100, ticks down per request). We expose
+      // it on the public payload so the health-check workflow can alert when
+      // we're approaching the cap.
+      const quotaHeader = resp.headers.get("x-ratelimit-requests-remaining");
+      if (quotaHeader != null) {
+        const parsed = parseInt(quotaHeader, 10);
+        if (Number.isFinite(parsed)) {
+          apiQuotaRemaining = parsed;
+        }
       }
       data = await resp.json();
     } catch (e) {
@@ -118,6 +134,11 @@ export default {
 
     const matches = mergeWithPrevious(fresh, oldMatches, now);
     const payload = { lastFetchedUtc: now, matches };
+    // Only include the quota field when we actually have a fresh reading from
+    // this cron tick — never carry over a stale value from the prior payload.
+    if (apiQuotaRemaining != null) {
+      payload.apiQuotaRemaining = apiQuotaRemaining;
+    }
     await env.GARMIN_WC_GAME_STATUS_KV.put(STATUS_KEY, JSON.stringify(payload));
   }
 };

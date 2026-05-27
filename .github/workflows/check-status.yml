@@ -62,5 +62,21 @@ jobs:
             exit 1
           fi
 
+          # apiQuotaRemaining is only present when the most recent cron tick
+          # actually hit api-football (i.e. inside a live window). When it IS
+          # present, warn if we're approaching the free-tier 100/day cap.
+          # Threshold 30 = ~10-call buffer past estimated peak day usage (~77).
+          QUOTA=$(jq -r '.apiQuotaRemaining // empty' /tmp/status.json)
+          if [ -n "$QUOTA" ]; then
+            if ! [[ "$QUOTA" =~ ^[0-9]+$ ]]; then
+              echo "::error::apiQuotaRemaining present but not a positive integer: $QUOTA"
+              exit 1
+            fi
+            if [ "$QUOTA" -lt 30 ]; then
+              echo "::error::api-football quota low: $QUOTA calls remaining today"
+              exit 1
+            fi
+          fi
+
           MATCH_COUNT=$(jq '.matches | length' /tmp/status.json)
-          echo "OK: lastFetchedUtc=$LFU, matches=$MATCH_COUNT"
+          echo "OK: lastFetchedUtc=$LFU, matches=$MATCH_COUNT, apiQuotaRemaining=${QUOTA:-N/A}"
