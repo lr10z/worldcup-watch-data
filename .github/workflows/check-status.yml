@@ -1,0 +1,66 @@
+name: Check status.json health
+
+# Periodically probes the Cloudflare Worker's status.json endpoint to catch
+# silent outages — Worker down, KV unreachable, malformed payload. The watch
+# face degrades gracefully on these (falls back to a clock-window "· LIVE"
+# indicator) so it's not user-visibly broken, but we still want to know.
+#
+# Failure here → GitHub emails the repo owner via the standard workflow-failure
+# notification path. Same delivery as the matches updater.
+#
+# We do NOT alert on lastFetchedUtc staleness here — during idle periods
+# between match days, lastFetchedUtc is supposed to be stale (Worker writes
+# only inside live windows). Adding a staleness check would require this
+# workflow to know the match schedule, which is out of scope.
+
+on:
+  schedule:
+    # Every 30 minutes, off the hour (GitHub delays on-the-hour schedules under
+    # load). Matches the cadence of update-matches.yml — same noise/coverage
+    # tradeoff. Detection lag for a Worker outage is at most 30 min, well
+    # inside a single match's window.
+    - cron: "13,43 * * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and validate status.json
+        run: |
+          set -euo pipefail
+          URL="https://garmin-watchface-wc-game-status.lr10.workers.dev/status.json"
+
+          STATUS=$(curl --max-time 15 -s -o /tmp/status.json -w "%{http_code}" "$URL")
+          echo "HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Expected HTTP 200, got $STATUS"
+            cat /tmp/status.json || true
+            exit 1
+          fi
+
+          if ! jq empty /tmp/status.json 2>/dev/null; then
+            echo "::error::Response body is not valid JSON"
+            cat /tmp/status.json
+            exit 1
+          fi
+
+          LFU=$(jq -r '.lastFetchedUtc // empty' /tmp/status.json)
+          if [ -z "$LFU" ]; then
+            echo "::error::Missing lastFetchedUtc field"
+            cat /tmp/status.json
+            exit 1
+          fi
+          if ! [[ "$LFU" =~ ^[0-9]+$ ]]; then
+            echo "::error::lastFetchedUtc is not a positive integer: $LFU"
+            exit 1
+          fi
+
+          if ! jq -e '.matches | type == "object"' /tmp/status.json > /dev/null; then
+            echo "::error::matches field missing or not an object"
+            cat /tmp/status.json
+            exit 1
+          fi
+
+          MATCH_COUNT=$(jq '.matches | length' /tmp/status.json)
+          echo "OK: lastFetchedUtc=$LFU, matches=$MATCH_COUNT"
