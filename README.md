@@ -1,6 +1,9 @@
 # worldcup-watch-data
 
-Live match data for the World Cup 2026 Garmin watch face. The watch fetches `matches.json` from this repo (served over GitHub Pages) about every 5 minutes and lays it over its built-in schedule.
+Match data feeds for the World Cup 2026 Garmin watch face. The repo serves two files:
+
+- **`matches.json`** — knockout-team resolutions and reschedules (served via GitHub Pages). Manually editable; most of this README documents how. Watch fetches roughly every 5 min.
+- **`status.json`** — live match phase codes (1H/2H/HT/ET/PEN/FT) served via a Cloudflare Worker that polls api-football on a cron. Hands-off — runs itself. See [`worker/README.md`](worker/README.md) for architecture, deployment, and monitoring details.
 
 ## The idea
 
