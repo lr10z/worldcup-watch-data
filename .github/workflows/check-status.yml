@@ -64,15 +64,19 @@ jobs:
 
           # apiQuotaRemaining is only present when the most recent cron tick
           # actually hit api-football (i.e. inside a live window). When it IS
-          # present, warn if we're approaching the free-tier 100/day cap.
-          # Threshold 30 = ~10-call buffer past estimated peak day usage (~77).
+          # present, warn if we're approaching the Pro-tier 7,500/day cap
+          # (Pro subscription purchased 2026-06-10 for the World Cup window).
+          # Threshold 1,000 leaves ~500 calls of buffer past estimated peak
+          # day usage (~480 = 1-min cron × 4 simultaneous matches × ~2h each).
+          # If/when Pro lapses and we revert to the free tier, drop this back
+          # to 30 (= ~10-call buffer past the ~77-call peak on the 100/day cap).
           QUOTA=$(jq -r '.apiQuotaRemaining // empty' /tmp/status.json)
           if [ -n "$QUOTA" ]; then
             if ! [[ "$QUOTA" =~ ^[0-9]+$ ]]; then
               echo "::error::apiQuotaRemaining present but not a positive integer: $QUOTA"
               exit 1
             fi
-            if [ "$QUOTA" -lt 30 ]; then
+            if [ "$QUOTA" -lt 1000 ]; then
               echo "::error::api-football quota low: $QUOTA calls remaining today"
               exit 1
             fi

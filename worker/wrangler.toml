@@ -2,17 +2,22 @@ name = "garmin-watchface-wc-game-status"
 main = "src/index.js"
 compatibility_date = "2026-05-26"
 
-# Cron fires every 10 minutes. The Worker's scheduled handler decides whether to
+# Cron fires every minute. The Worker's scheduled handler decides whether to
 # actually call api-football, based on a baked-in kickoff schedule — outside live
 # windows it returns immediately, so the API quota only burns during matches.
 #
-# 10-min cadence keeps us under api-football's 100/day free tier even on peak
-# 4-match days (~62 calls vs the 100 cap). The watch's displayed match minute
-# is up to 10 min stale; that's the trade-off for staying free. Bumping to
-# */5 or */3 would burn through the quota on busy days; bumping to */15 would
-# make the minute display feel sluggish.
+# 1-min cadence on api-football Pro tier (7,500 calls/day, $19/mo, purchased
+# 2026-06-10 for the World Cup window). Peak 4-match day = ~480 calls vs the
+# 7,500 cap → ~6% utilisation, comfortable margin. Watch-displayed match minute
+# is up to ~1 min stale at this Worker cadence, plus up to 5 min for the watch
+# face's own background fetch (Garmin platform minimum), so ~6 min worst-case
+# end-to-end. Old free-tier comment is preserved below for the post-tournament
+# downgrade path.
+#
+# When the Pro subscription expires, revert to "*/10 * * * *" (or buy another
+# month). On free tier, 10-min keeps us under the 100/day cap on peak days.
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["* * * * *"]
 
 # KV holds the latest status.json payload under a single key. Created once via:
 #   wrangler kv namespace create garmin_wc_game_status_kv
