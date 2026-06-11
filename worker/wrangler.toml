@@ -34,3 +34,18 @@ WC_LEAGUE_ID = "1"
 
 # The api-football API key is stored as a secret (not in this file) via:
 #   wrangler secret put API_FOOTBALL_KEY
+
+# Workers Logs persistence: when the Worker fires (during live match windows),
+# Cloudflare retains the invocation logs in the dashboard so we can audit the
+# api-football fetch cycle after the fact. Toggled on via the dashboard
+# (Settings → Observability → Logs) on 2026-06-10; this block mirrors that
+# change so a future `wrangler deploy` doesn't strip it. Retention window is
+# whatever Cloudflare's current free-tier policy is — check their docs if you
+# need an exact number.
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Empty table = traces config exists with defaults (still disabled). Required
+# so wrangler doesn't treat the absence as a directive to remove traces config.
+[observability.traces]
