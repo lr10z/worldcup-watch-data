@@ -36,6 +36,13 @@ import urllib.request
 OPENFOOTBALL_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.json"
 OUT_PATH = "matches.json"
 
+# Compact pipe-delimited mirror of matches.json. The watch face's background
+# fetch parses this with HTTP_RESPONSE_CONTENT_TYPE_TEXT_PLAIN instead of JSON
+# to avoid Garmin's JSON parser blowing the background memory budget (-403
+# NETWORK_RESPONSE_OUT_OF_MEMORY) on memory-constrained devices.
+# Format: one match per line, "<matchId>|<t1>|<t2>[|<kickoffEpochSec>]".
+TEXT_OUT_PATH = "matches.txt"
+
 # openfootball spelling -> the watch face's spelling (only where they differ).
 # Verified complete against the 2026 group-stage rosters.
 NAME_MAP = {
@@ -150,7 +157,15 @@ def main():
     merged = dict(sorted(merge(existing_matches, resolved).items(), key=_match_sort_key))
 
     if have_valid_file and merged == existing_matches:
-        print(f"No change ({len(resolved)} resolved knockout game(s)); matches.json left as is.")
+        # matches.json is unchanged, but if matches.txt is missing (e.g. first
+        # run after the format was added) regenerate it from the existing data
+        # so the watch face always has a current mirror to fetch.
+        import os
+        if not os.path.exists(TEXT_OUT_PATH):
+            write_text(merged, TEXT_OUT_PATH)
+            print(f"No change to matches.json; wrote missing matches.txt ({len(merged)} entries).")
+        else:
+            print(f"No change ({len(resolved)} resolved knockout game(s)); matches.json + matches.txt left as is.")
         return
 
     version = existing["version"] if (existing is not None and isinstance(existing.get("version"), int)) else 1
@@ -162,8 +177,39 @@ def main():
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"Updated matches.json: {len(resolved)} resolved knockout game(s) merged; "
+
+    # Mirror the same payload to a compact pipe-delimited file for the watch
+    # face's memory-constrained background fetch (see TEXT_OUT_PATH note above).
+    write_text(merged, TEXT_OUT_PATH)
+
+    print(f"Updated matches.json + matches.txt: {len(resolved)} resolved knockout game(s) merged; "
           f"{len(merged)} total entr{'y' if len(merged) == 1 else 'ies'}.")
+
+
+def write_text(merged, path):
+    """Emit one match per line as <id>|<t1>|<t2>[|<kickoff>] (UTF-8, LF endings).
+
+    Sorted by numeric match id so the file is diff-stable. Entries missing t1 or
+    t2 are skipped — the watch face has no use for a partial line and we never
+    want to ship one. Optional kickoff is appended only when present and an int.
+    """
+    lines = []
+    for mid, entry in sorted(merged.items(), key=_match_sort_key):
+        if not isinstance(entry, dict):
+            continue
+        t1 = entry.get("t1")
+        t2 = entry.get("t2")
+        if not isinstance(t1, str) or not isinstance(t2, str):
+            continue
+        line = f"{mid}|{t1}|{t2}"
+        kickoff = entry.get("kickoff")
+        if isinstance(kickoff, int):
+            line += f"|{kickoff}"
+        lines.append(line)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+        if lines:
+            f.write("\n")
 
 
 if __name__ == "__main__":
