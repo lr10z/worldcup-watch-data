@@ -1,29 +1,38 @@
 #!/usr/bin/env python3
 """
-build_matches.py -- regenerate matches.json from openfootball results.
+build_matches.py -- regenerate matches.json + per-match files from openfootball.
 
 Reads the openfootball World Cup 2026 schedule, finds knockout games whose teams
-have been decided, and writes them to matches.json keyed by FIFA match number.
-The watch face overlays these onto its built-in bracket, turning placeholders
-like "1A"/"W73" into the real teams.
+have been decided, and writes:
+
+  1. matches.json -- the legacy full-payload file kept for v1.0.4 watch face
+     clients still on the old fetch URL. Same shape as before.
+
+  2. matches/<id>.txt -- one tiny text file per resolved knockout match, served
+     individually so the watch face's memory-constrained background fetch on
+     small-budget devices (Fenix 6X Pro: -403 NETWORK_RESPONSE_OUT_OF_MEMORY at
+     177 bytes; 88 bytes verified to fit) can pull just the row it needs
+     (~20 bytes) instead of the whole bracket.
+
+Format of a per-match file: "<team1>|<team2>[|<kickoffEpochSec>]\\n"
+(Match id is implicit in the URL, not repeated in the body.)
 
 Scope: knockout team resolution only. Group games and not-yet-decided knockout
-games are left out (the watch keeps its built-in data). Reschedules are handled
-by hand for now.
+games are left out (the watch keeps its built-in bracket placeholder for those).
+Reschedules are handled by hand for now.
 
 Usage:
-    python3 build_matches.py                # fetch openfootball, update matches.json
+    python3 build_matches.py                # fetch openfootball, refresh files
     python3 build_matches.py <local.json>   # use a local openfootball file (testing)
 
-Merges resolved knockout teams INTO the existing matches.json rather than
-replacing it: hand-added entries (e.g. a kickoff reschedule typed in from a
-phone) and any kickoff field are preserved, and nothing is ever deleted. Writes
-only when the merged result actually changes, so a run that finds nothing new
-produces no diff (and so no pull request).
+Merges resolved knockout teams INTO existing matches.json rather than replacing
+it: hand-added entries (e.g. a kickoff reschedule typed in from a phone) and
+any kickoff field are preserved, and nothing is ever deleted from matches.json.
 """
 
 import datetime
 import json
+import os
 import sys
 import urllib.request
 
@@ -34,14 +43,18 @@ import urllib.request
 # form was current. Grab this link from GitHub's "Raw" button rather than typing
 # the short form by hand.
 OPENFOOTBALL_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.json"
+
+# Legacy combined-JSON output. Kept so v1.0.4 watch face clients on the old
+# fetch path don't suddenly start 404'ing. New clients (v1.0.5+) fetch the
+# per-match files below.
 OUT_PATH = "matches.json"
 
-# Compact pipe-delimited mirror of matches.json. The watch face's background
-# fetch parses this with HTTP_RESPONSE_CONTENT_TYPE_TEXT_PLAIN instead of JSON
-# to avoid Garmin's JSON parser blowing the background memory budget (-403
-# NETWORK_RESPONSE_OUT_OF_MEMORY) on memory-constrained devices.
-# Format: one match per line, "<matchId>|<t1>|<t2>[|<kickoffEpochSec>]".
-TEXT_OUT_PATH = "matches.txt"
+# Directory holding one tiny "<id>.txt" file per resolved knockout match.
+# Served by GitHub Pages as text/plain. The watch face's BackgroundService
+# computes the next-upcoming match ID locally and fetches just that file, so
+# the response body fits comfortably (~20 bytes vs the ~180-byte combined file
+# that overflowed the Fenix 6X Pro background memory budget).
+MATCHES_DIR = "matches"
 
 # openfootball spelling -> the watch face's spelling (only where they differ).
 # Verified complete against the 2026 group-stage rosters.
@@ -50,28 +63,6 @@ NAME_MAP = {
     "Czech Republic": "Czechia",
     "Turkey": "Türkiye",
     "United States": "USA",
-}
-
-# Watch face team name -> FIFA 3-letter country code. matches.txt emits the
-# codes (10-12 bytes/line) instead of full names (20-30 bytes/line) so the
-# Garmin background fetch buffer fits within the tight memory budget on
-# small-budget devices (Fenix 6X Pro: 313-byte matches.txt was returning
-# -403 NETWORK_RESPONSE_OUT_OF_MEMORY; the codes-only version is ~180 bytes).
-# The watch face's MatchupsCodeMap maps codes back to full names at parse
-# time, in MAIN where memory is plentiful.
-TEAM_CODE = {
-    "Algeria": "ALG", "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT",
-    "Belgium": "BEL", "Bosnia": "BIH", "Brazil": "BRA", "Canada": "CAN",
-    "Cape Verde": "CPV", "Colombia": "COL", "Croatia": "CRO", "Curaçao": "CUW",
-    "Czechia": "CZE", "DR Congo": "COD", "Ecuador": "ECU", "Egypt": "EGY",
-    "England": "ENG", "France": "FRA", "Germany": "GER", "Ghana": "GHA",
-    "Haiti": "HAI", "Iran": "IRN", "Iraq": "IRQ", "Ivory Coast": "CIV",
-    "Japan": "JPN", "Jordan": "JOR", "Mexico": "MEX", "Morocco": "MAR",
-    "Netherlands": "NED", "New Zealand": "NZL", "Norway": "NOR", "Panama": "PAN",
-    "Paraguay": "PAR", "Portugal": "POR", "Qatar": "QAT", "Saudi Arabia": "KSA",
-    "Scotland": "SCO", "Senegal": "SEN", "South Africa": "RSA", "South Korea": "KOR",
-    "Spain": "ESP", "Sweden": "SWE", "Switzerland": "SUI", "Tunisia": "TUN",
-    "Türkiye": "TUR", "USA": "USA", "Uruguay": "URU", "Uzbekistan": "UZB",
 }
 
 # The 48 finalists, exactly as the watch face spells them. We validate resolved
@@ -169,6 +160,38 @@ def _match_sort_key(item):
     return (1, 0, str(key))
 
 
+def write_per_match(merged, directory):
+    """Write one "<id>.txt" file under <directory>/ per resolvable match.
+
+    Body: "<team1>|<team2>[|<kickoffEpochSec>]\\n" — match id is implicit in
+    the filename, not repeated in the body. Tiny on purpose so the watch face's
+    background fetch fits within the Garmin BG memory budget on small-budget
+    devices.
+
+    Entries missing t1 or t2 are skipped — the watch face has no use for a
+    partial line and we never want to ship a half-resolved knockout.
+    """
+    os.makedirs(directory, exist_ok=True)
+    written = 0
+    for mid, entry in sorted(merged.items(), key=_match_sort_key):
+        if not isinstance(entry, dict):
+            continue
+        t1 = entry.get("t1")
+        t2 = entry.get("t2")
+        if not isinstance(t1, str) or not isinstance(t2, str):
+            continue
+        body = f"{t1}|{t2}"
+        kickoff = entry.get("kickoff")
+        if isinstance(kickoff, int):
+            body += f"|{kickoff}"
+        body += "\n"
+        path = os.path.join(directory, f"{mid}.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        written += 1
+    return written
+
+
 def main():
     resolved = build_matches(load_openfootball())
 
@@ -178,14 +201,16 @@ def main():
 
     merged = dict(sorted(merge(existing_matches, resolved).items(), key=_match_sort_key))
 
+    # Always regenerate the per-match files. Each rewrite is cheap and idempotent
+    # (same bytes on no-data-change ticks → no git diff → no PR). This keeps the
+    # output current even when matches.json itself doesn't change (e.g. after a
+    # format-only refactor like the move from one combined file to per-match
+    # files in v1.0.5).
+    written = write_per_match(merged, MATCHES_DIR)
+
     if have_valid_file and merged == existing_matches:
-        # matches.json is unchanged, but always regenerate matches.txt — its
-        # FORMAT can change (e.g. switching from full team names to FIFA codes)
-        # while the underlying data stays the same. If the regenerated bytes
-        # match the existing matches.txt, git will see no diff and no PR will
-        # open. If the format changed, the diff appears here and the PR fires.
-        write_text(merged, TEXT_OUT_PATH)
-        print(f"No data change ({len(resolved)} resolved knockout game(s)); matches.json untouched, matches.txt regenerated.")
+        print(f"No data change ({len(resolved)} resolved knockout game(s)); "
+              f"matches.json untouched, {written} per-match file(s) regenerated.")
         return
 
     version = existing["version"] if (existing is not None and isinstance(existing.get("version"), int)) else 1
@@ -198,54 +223,9 @@ def main():
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
-    # Mirror the same payload to a compact pipe-delimited file for the watch
-    # face's memory-constrained background fetch (see TEXT_OUT_PATH note above).
-    write_text(merged, TEXT_OUT_PATH)
-
-    print(f"Updated matches.json + matches.txt: {len(resolved)} resolved knockout game(s) merged; "
+    print(f"Updated matches.json + {written} per-match file(s): "
+          f"{len(resolved)} resolved knockout game(s) merged; "
           f"{len(merged)} total entr{'y' if len(merged) == 1 else 'ies'}.")
-
-
-def write_text(merged, path):
-    """Emit one match per line as <id>|<code1>|<code2>[|<kickoff>] (UTF-8, LF).
-
-    Sorted by numeric match id so the file is diff-stable. Entries missing t1
-    or t2 (full team names) are skipped — the watch face has no use for a
-    partial line. Team names are converted to FIFA 3-letter codes via TEAM_CODE
-    to keep the file small enough for the Garmin BG fetch buffer on tight-
-    memory devices (Fenix 6X Pro). An unknown team name (a bug in NAME_MAP or
-    a new entrant) is also skipped — better to leave that row as the bracket
-    placeholder on the watch than to ship a code the watch doesn't recognise.
-    Optional kickoff is appended only when present and an int.
-    """
-    lines = []
-    skipped_unknown = []
-    for mid, entry in sorted(merged.items(), key=_match_sort_key):
-        if not isinstance(entry, dict):
-            continue
-        t1 = entry.get("t1")
-        t2 = entry.get("t2")
-        if not isinstance(t1, str) or not isinstance(t2, str):
-            continue
-        c1 = TEAM_CODE.get(t1)
-        c2 = TEAM_CODE.get(t2)
-        if c1 is None or c2 is None:
-            skipped_unknown.append(f"{mid}: {t1!r} / {t2!r}")
-            continue
-        line = f"{mid}|{c1}|{c2}"
-        kickoff = entry.get("kickoff")
-        if isinstance(kickoff, int):
-            line += f"|{kickoff}"
-        lines.append(line)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-        if lines:
-            f.write("\n")
-    if skipped_unknown:
-        # Surface in the workflow log so a missing TEAM_CODE entry is loud.
-        print("WARNING: matches.txt skipped rows without a FIFA code mapping:")
-        for s in skipped_unknown:
-            print("  " + s)
 
 
 if __name__ == "__main__":
