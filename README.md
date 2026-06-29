@@ -1,73 +1,85 @@
 # worldcup-watch-data
 
-Match data feeds for the World Cup 2026 Garmin watch face. The repo serves two files:
+Match data feeds for the World Cup 2026 Garmin watch face.
 
-- **`matches.json`** — knockout-team resolutions and reschedules (served via GitHub Pages). Manually editable; most of this README documents how. Watch fetches roughly every 5 min.
-- **`status.json`** — live match phase codes (1H/2H/HT/ET/PEN/FT) served via a Cloudflare Worker that polls api-football on a cron. Hands-off — runs itself. See [`worker/README.md`](worker/README.md) for architecture, deployment, and monitoring details.
+## What this repo serves
 
-## The idea
+Three feeds:
 
-The watch already has the full 104-game schedule built in. This file only carries **corrections** -- things that differ from that built-in schedule:
+- **`/matches/<id>.txt`** — one tiny text file per resolved knockout match, served via GitHub Pages (~20 bytes each). **This is what v1.0.5+ watches fetch.** The watch's background service computes the next-upcoming match ID locally and pulls just that file, so the response body stays well under the Garmin background-fetch memory budget. Larger combined files (~180 bytes) were OOM'ing on small-budget devices like the Fenix 6X Pro and Forerunner 55 — hence the per-match split.
+- **`matches.json`** — the legacy combined-JSON file, kept for v1.0.4 watch faces still on the old fetch path. v1.0.5+ doesn't read it. New work should target the per-match files; `matches.json` is preserved on a "do no harm" basis.
+- **`status.json`** — live match phase codes (1H/2H/HT/ET/PEN/FT) served via a Cloudflare Worker that polls api-football on a cron. Hands-off — runs itself. See [`worker/README.md`](worker/README.md) for architecture, deployment, and monitoring.
 
-- A knockout team that's now decided (e.g. the "2A" placeholder is now Mexico).
-- A game whose kickoff time changed (a reschedule).
+## How updates flow
 
-Any game you don't list here just uses its built-in info. So most of the time this file is small, or even empty.
+In steady state, you don't edit anything by hand — the data updates itself:
 
-## Format
-
-```json
-{
-  "version": 1,
-  "updated": "2026-06-28T22:00:00Z",
-  "matches": {
-    "89": { "t1": "Mexico", "t2": "England" }
-  }
-}
+```
+openfootball/worldcup.json
+        │
+        │  every 30 min (cron)
+        ▼
+.github/workflows/update-matches.yml
+   ├─ runs scripts/build_matches.py
+   ├─ regenerates matches/<id>.txt (per-match)
+   └─ updates matches.json (legacy)
+        │
+        │  opens PR if anything changed
+        ▼
+Review + merge PR
+        │
+        │  GitHub Pages publishes
+        ▼
+Watch face fetches next match's .txt (within ~5 min)
 ```
 
-- **`version`** -- leave it at `1`. It marks the file's *format*, not its contents. (The watch doesn't read it today; only bump it if the format itself ever changes.)
-- **`updated`** -- a free-form note of when you last edited it. The watch ignores it; fill it in or don't.
-- **`matches`** -- the corrections, keyed by **FIFA match number** (see the reference at the bottom). This is the part that matters.
+`build_matches.py` only writes **team names** for resolved knockout matches. Group-stage entries and kickoff times in `matches.json` are passed through untouched — anything hand-added survives every regeneration.
 
-### An entry
+## Per-match file format
 
-- **`t1`, `t2`** -- the two team names. **Required.** Use the exact spelling from the reference table (e.g. `South Korea`, `Bosnia`, `USA`).
-- **`kickoff`** -- **optional.** A Unix epoch in seconds. Include it *only* if the game was **rescheduled**; leave it out and the watch keeps the built-in time.
-
-### Examples
-
-Fill in a resolved knockout game (time unchanged -- the usual case):
-
-```json
-"89": { "t1": "Mexico", "t2": "England" }
+```
+<team1>|<team2>[|<kickoffEpochSec>]
 ```
 
-Reschedule a game (new time):
+The match ID is implicit in the filename (e.g. `matches/89.txt`), not repeated in the body. A trailing newline is included.
+
+Examples:
+
+```
+Mexico|England
+```
+
+```
+Mexico|England|1783200000
+```
+
+Team names must use the watch face's spelling (see the reference table below). Mismatched spelling means the watch can't find the team's flag.
+
+## Manual edits (reschedules)
+
+The build script owns team names only. If FIFA reschedules a knockout match, add a `kickoff` field (Unix epoch in seconds, UTC) to that match's entry in `matches.json` by hand:
 
 ```json
 "89": { "t1": "Mexico", "t2": "England", "kickoff": 1783200000 }
 ```
 
-Need an epoch for a date? Use any online "epoch converter" (enter the time in **UTC**), or on a Mac:
+The build script preserves the `kickoff` field on subsequent runs, and the per-match file generator picks it up automatically. To get an epoch for a date:
 
 ```
 date -u -d "2026-07-05 19:00:00" +%s
 ```
 
-## How to edit
+(On macOS: `date -j -u -f "%Y-%m-%d %H:%M:%S" "2026-07-05 19:00:00" +%s`.)
 
-On GitHub: open `matches.json`, click the pencil to edit, make your change, and commit. The update reaches watches within ~5 minutes (plus a short GitHub Pages publish delay).
+## Safety net
 
-## Good to know
-
-- It must stay **valid JSON**. If it's broken, or one entry is malformed, the watch safely ignores it and keeps the last good copy -- it never shows garbage.
-- **Team names must match the reference exactly**, or the flag won't be found.
-- Remove an entry and the watch reverts that game to its built-in placeholder/time on the next fetch.
+- `matches.json` must stay **valid JSON**. If the file is broken, or one entry is malformed, the watch safely ignores it and keeps the last good copy — it never shows garbage.
+- Per-match `.txt` files are validated on the watch side too: a malformed body is rejected, and that match keeps its bracket-placeholder display until the next successful fetch.
+- The `check-status.yml` GitHub Action probes `status.json` every 30 minutes and fails (which emails the repo owner) if the Worker is down, the payload is malformed, or the api-football quota gets low.
 
 ## Match-number reference
 
-The number you put as the key under `matches`. Knockout games show their bracket slot (e.g. `W74` = winner of match 74, `2A` = Group A runner-up); fill those in with the real teams once they're known.
+The number you'd put as a key under `matches`. Group games show the actual fixture; knockout games show their bracket slot (e.g. `W74` = winner of match 74, `2A` = Group A runner-up). The build script auto-fills knockout team names once they're resolved; the table here is mostly for hand-edit reference.
 
 ### Group stage (1-72)
 
