@@ -1,0 +1,76 @@
+name: Check upcoming match files
+
+# Verifies that matches/<id>.txt exists in the repo for every match whose
+# kickoff is within the next 48 hours. If any are missing, the workflow
+# fails and GitHub emails the repo owner (same delivery as the matches
+# updater and the Cloudflare Worker status check).
+#
+# Why this exists: the watch face's background pre-fetch loop walks the
+# schedule in kickoff order and asks for the next not-yet-cached match's
+# file. If the server is missing an earlier-kickoff match's file but later
+# matches' files are present, the loop hammers the missing one with 404s
+# every tick and never reaches the later. This alert gives Leo lead time
+# to hand-add the missing file (edit the .txt directly in the GitHub UI)
+# before the affected match actually starts.
+#
+# Pairs with:
+#   - .github/workflows/update-matches.yml  (cron :23, :53 — fills files from openfootball)
+#   - .github/workflows/check-status.yml    (cron :13, :43 — Cloudflare Worker health)
+#   - schedule.json                         (source of match ids + kickoff times)
+
+on:
+  schedule:
+    # Every 30 min, offset from the two existing workflows so all three
+    # don't try to grab a runner at the same instant.
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify per-match files for the next 48 hours of kickoffs
+        run: |
+          set -euo pipefail
+
+          NOW_EPOCH=$(date -u +%s)
+          HORIZON=$((NOW_EPOCH + 48 * 3600))
+
+          # The while-read pipe runs in a subshell, so set-flagging via a
+          # variable wouldn't propagate to the outer shell. Use a sentinel
+          # file instead: if it exists at the end, we had a miss → exit 1.
+          rm -f /tmp/missing_files
+
+          # Walk every match in schedule.json. Only matches whose kickoff is
+          # strictly in the future AND within the 48-hour horizon are checked
+          # — past matches are out of the pre-fetch path and not worth
+          # alerting on.
+          jq -c '.matches[]' schedule.json | while read -r entry; do
+            id=$(echo "$entry" | jq -r '.id')
+            kickoff=$(echo "$entry" | jq -r '.kickoff_utc')
+            kickoff_iso=$(echo "$entry" | jq -r '.kickoff_iso')
+            stage=$(echo "$entry" | jq -r '.stage')
+            matchup=$(echo "$entry" | jq -r '.matchup')
+
+            if [ "$kickoff" -gt "$NOW_EPOCH" ] && [ "$kickoff" -le "$HORIZON" ]; then
+              if [ ! -f "matches/${id}.txt" ]; then
+                hours_until=$(( (kickoff - NOW_EPOCH) / 3600 ))
+                # GitHub's ::error:: annotation surfaces the line in the
+                # Actions UI summary and in the failure email body.
+                echo "::error::Missing matches/${id}.txt — ${stage}: ${matchup}, kicks off ${kickoff_iso} (in ~${hours_until}h). Hand-edit the file in via the GitHub web UI; the watch face will pick it up on its next 5-min fetch tick."
+                touch /tmp/missing_files
+              fi
+            fi
+          done
+
+          if [ -f /tmp/missing_files ]; then
+            echo ""
+            echo "One or more upcoming match files are missing from the repo."
+            echo "Add the missing matches/<id>.txt file(s) via the GitHub web UI."
+            echo "Format: <team1>|<team2>  (one line, optional |<kickoff_epoch> appended for reschedules)."
+            exit 1
+          fi
+
+          echo "All match files present for upcoming-within-48h kickoffs."

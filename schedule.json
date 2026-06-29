@@ -1,0 +1,229 @@
+{
+  "note": "Schedule of all 32 knockout matches. Used by .github/workflows/check-missing-matches.yml to alert when an upcoming match is missing its matches/<id>.txt file. Kickoff times match watch-face-mvp/source/Schedule.mc:MATCHES; if you change one, change the other.",
+  "matches": [
+    {
+      "id": 73,
+      "kickoff_utc": 1782673200,
+      "kickoff_iso": "2026-06-28T19:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "2A v 2B"
+    },
+    {
+      "id": 76,
+      "kickoff_utc": 1782752400,
+      "kickoff_iso": "2026-06-29T17:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1C v 2F"
+    },
+    {
+      "id": 74,
+      "kickoff_utc": 1782765000,
+      "kickoff_iso": "2026-06-29T20:30:00Z",
+      "stage": "Round of 32",
+      "matchup": "1E v 3A/B/C/D/F"
+    },
+    {
+      "id": 75,
+      "kickoff_utc": 1782781200,
+      "kickoff_iso": "2026-06-30T01:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1F v 2C"
+    },
+    {
+      "id": 78,
+      "kickoff_utc": 1782838800,
+      "kickoff_iso": "2026-06-30T17:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "2E v 2I"
+    },
+    {
+      "id": 77,
+      "kickoff_utc": 1782853200,
+      "kickoff_iso": "2026-06-30T21:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1I v 3C/D/F/G/H"
+    },
+    {
+      "id": 79,
+      "kickoff_utc": 1782867600,
+      "kickoff_iso": "2026-07-01T01:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1A v 3C/E/F/H/I"
+    },
+    {
+      "id": 80,
+      "kickoff_utc": 1782921600,
+      "kickoff_iso": "2026-07-01T16:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1L v 3E/H/I/J/K"
+    },
+    {
+      "id": 82,
+      "kickoff_utc": 1782936000,
+      "kickoff_iso": "2026-07-01T20:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1G v 3A/E/H/I/J"
+    },
+    {
+      "id": 81,
+      "kickoff_utc": 1782950400,
+      "kickoff_iso": "2026-07-02T00:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1D v 3B/E/F/I/J"
+    },
+    {
+      "id": 84,
+      "kickoff_utc": 1783018800,
+      "kickoff_iso": "2026-07-02T19:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1H v 2J"
+    },
+    {
+      "id": 83,
+      "kickoff_utc": 1783033200,
+      "kickoff_iso": "2026-07-02T23:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "2K v 2L"
+    },
+    {
+      "id": 85,
+      "kickoff_utc": 1783047600,
+      "kickoff_iso": "2026-07-03T03:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1B v 3E/F/G/I/J"
+    },
+    {
+      "id": 88,
+      "kickoff_utc": 1783101600,
+      "kickoff_iso": "2026-07-03T18:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "2D v 2G"
+    },
+    {
+      "id": 86,
+      "kickoff_utc": 1783116000,
+      "kickoff_iso": "2026-07-03T22:00:00Z",
+      "stage": "Round of 32",
+      "matchup": "1J v 2H"
+    },
+    {
+      "id": 87,
+      "kickoff_utc": 1783128600,
+      "kickoff_iso": "2026-07-04T01:30:00Z",
+      "stage": "Round of 32",
+      "matchup": "1K v 3D/E/I/J/L"
+    },
+    {
+      "id": 90,
+      "kickoff_utc": 1783184400,
+      "kickoff_iso": "2026-07-04T17:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W73 v W75"
+    },
+    {
+      "id": 89,
+      "kickoff_utc": 1783198800,
+      "kickoff_iso": "2026-07-04T21:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W74 v W77"
+    },
+    {
+      "id": 91,
+      "kickoff_utc": 1783281600,
+      "kickoff_iso": "2026-07-05T20:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W76 v W78"
+    },
+    {
+      "id": 92,
+      "kickoff_utc": 1783296000,
+      "kickoff_iso": "2026-07-06T00:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W79 v W80"
+    },
+    {
+      "id": 93,
+      "kickoff_utc": 1783364400,
+      "kickoff_iso": "2026-07-06T19:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W83 v W84"
+    },
+    {
+      "id": 94,
+      "kickoff_utc": 1783382400,
+      "kickoff_iso": "2026-07-07T00:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W81 v W82"
+    },
+    {
+      "id": 95,
+      "kickoff_utc": 1783440000,
+      "kickoff_iso": "2026-07-07T16:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W86 v W88"
+    },
+    {
+      "id": 96,
+      "kickoff_utc": 1783454400,
+      "kickoff_iso": "2026-07-07T20:00:00Z",
+      "stage": "Round of 16",
+      "matchup": "W85 v W87"
+    },
+    {
+      "id": 97,
+      "kickoff_utc": 1783627200,
+      "kickoff_iso": "2026-07-09T20:00:00Z",
+      "stage": "Quarter-final",
+      "matchup": "W89 v W90"
+    },
+    {
+      "id": 98,
+      "kickoff_utc": 1783710000,
+      "kickoff_iso": "2026-07-10T19:00:00Z",
+      "stage": "Quarter-final",
+      "matchup": "W93 v W94"
+    },
+    {
+      "id": 99,
+      "kickoff_utc": 1783803600,
+      "kickoff_iso": "2026-07-11T21:00:00Z",
+      "stage": "Quarter-final",
+      "matchup": "W91 v W92"
+    },
+    {
+      "id": 100,
+      "kickoff_utc": 1783818000,
+      "kickoff_iso": "2026-07-12T01:00:00Z",
+      "stage": "Quarter-final",
+      "matchup": "W95 v W96"
+    },
+    {
+      "id": 101,
+      "kickoff_utc": 1784055600,
+      "kickoff_iso": "2026-07-14T19:00:00Z",
+      "stage": "Semi-final",
+      "matchup": "W97 v W98"
+    },
+    {
+      "id": 102,
+      "kickoff_utc": 1784142000,
+      "kickoff_iso": "2026-07-15T19:00:00Z",
+      "stage": "Semi-final",
+      "matchup": "W99 v W100"
+    },
+    {
+      "id": 103,
+      "kickoff_utc": 1784408400,
+      "kickoff_iso": "2026-07-18T21:00:00Z",
+      "stage": "Third Place",
+      "matchup": "L101 v L102"
+    },
+    {
+      "id": 104,
+      "kickoff_utc": 1784487600,
+      "kickoff_iso": "2026-07-19T19:00:00Z",
+      "stage": "Final",
+      "matchup": "W101 v W102"
+    }
+  ]
+}
