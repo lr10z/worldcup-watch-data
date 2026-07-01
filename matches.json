@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-06-28T13:05:03Z",
+  "updated": "2026-07-01T12:17:50Z",
   "matches": {
     "73": {
       "t1": "South Africa",
@@ -65,6 +65,18 @@
     "88": {
       "t1": "Australia",
       "t2": "Egypt"
+    },
+    "89": {
+      "t1": "Paraguay",
+      "t2": "France"
+    },
+    "90": {
+      "t1": "Canada",
+      "t2": "Morocco"
+    },
+    "91": {
+      "t1": "Brazil",
+      "t2": "Norway"
     }
   }
 }
