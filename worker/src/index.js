@@ -12,15 +12,19 @@
 //                                        // the upstream; absent otherwise.
 //                                        // Read by the health-check workflow.
 //     matches: {
-//       "<matchId>": { state: "firstHalf"|"secondHalf"|"halftime"|"extratime"|"penalties"|"fulltime",
-//                      asOfUtc?: <int>   // only on fulltime — first-FT timestamp for the 10-min grace
+//       "<matchId>": { state: "firstHalf"|"secondHalf"|"halftime"|"extratime"|
+//                             "penalties"|"fulltime"|"postponed"|"notstarted",
+//                      asOfUtc?: <int>   // first-detection timestamp; present on
+//                                        // fulltime / postponed / notstarted so
+//                                        // the watch can anchor its display window
 //                    }
 //     } }
 //
 // State-driven — no minute, no scores, no winner. The face shows the phase
-// code (1H / 2H / HT / ET / PEN / FT). `asOfUtc` is only set on fulltime
-// entries and is preserved across cron ticks (see mergeWithPrevious) so the
-// watch can roll to the next match exactly 10 min after the original FT.
+// code (1H / 2H / HT / ET / PEN / FT / PST / NS). `asOfUtc` is set on the
+// three stateful states and preserved across cron ticks (see mergeWithPrevious)
+// so the watch can anchor: 5-min FT grace, 60-min ·PST window, 60-min ·NS
+// window.
 //
 // The pure helpers (SCHEDULE, anyMatchActive, fixtureToMatchId, buildStatusEntry)
 // live in transform.js so they can be unit-tested in plain Node.
@@ -29,7 +33,8 @@ import {
   anyMatchActive,
   fixtureToMatchId,
   buildStatusEntry,
-  mergeWithPrevious
+  mergeWithPrevious,
+  filterForPayload
 } from "./transform.js";
 
 const STATUS_KEY = "status.json";
@@ -55,7 +60,29 @@ export default {
       return;   // Idle outside live windows — protects api-football quota.
     }
 
-    const url = `https://v3.football.api-sports.io/fixtures?live=all&league=${env.WC_LEAGUE_ID}`;
+    // Query all fixtures across a 2-day UTC range (yesterday + today) rather
+    // than a single ?date=<today>. Two reasons:
+    //
+    //  1. Single-date misses matches that kick off before midnight UTC and
+    //     stay live past it. Observed 2026-07-02: match 83 kicked off at 23:00
+    //     UTC July 2, was still in the second half at 00:26 UTC July 3, but our
+    //     Worker was querying date=2026-07-03 and api-football groups the
+    //     fixture under its kickoff date (2026-07-02), so it fell off the list
+    //     entirely. Query the 2-day window and we catch it.
+    //
+    //  2. The original endpoint switch away from ?live=all was to catch the
+    //     FT / AET / PEN transitions (which the live endpoint filtered out).
+    //     Both today and yesterday cover that intent — a match that kicked off
+    //     yesterday UTC and just ended will still be in the range.
+    //
+    // The bigger api-football response is Cloudflare-side only. The status.json
+    // payload we write to KV (and the watch fetches) is kept small by the
+    // filterForPayload step below — we only include entries the watch actually
+    // uses right now (live states + fresh fulltime), so it stays well under the
+    // ~180-byte fetch-buffer cliff on smaller-memory devices.
+    const today = new Date(now * 1000).toISOString().slice(0, 10);
+    const yesterday = new Date((now - 86400) * 1000).toISOString().slice(0, 10);
+    const url = `https://v3.football.api-sports.io/fixtures?from=${yesterday}&to=${today}&league=${env.WC_LEAGUE_ID}&season=2026`;
     let data;
     let apiQuotaRemaining = null;
     try {
@@ -116,7 +143,7 @@ export default {
 
     // Read the previous payload so we can preserve the original `asOfUtc` on
     // matches that were already in fulltime — that timestamp drives the
-    // watch's 10-minute FT-grace rollover and must NOT advance on each cron.
+    // watch's 5-minute FT-grace rollover and must NOT advance on each cron.
     let oldMatches = {};
     try {
       const prev = await env.GARMIN_WC_GAME_STATUS_KV.get(STATUS_KEY);
@@ -132,7 +159,12 @@ export default {
       oldMatches = {};
     }
 
-    const matches = mergeWithPrevious(fresh, oldMatches, now);
+    // Merge preserves FT asOfUtc across ticks (so the grace timer doesn't
+    // restart on every write). Then filter down to only entries the watch
+    // will actually render right now — keeps status.json small enough to fit
+    // under the smaller-memory devices' background fetch buffer ceiling.
+    const merged = mergeWithPrevious(fresh, oldMatches, now);
+    const matches = filterForPayload(merged, now);
     const payload = { lastFetchedUtc: now, matches };
     // Only include the quota field when we actually have a fresh reading from
     // this cron tick — never carry over a stale value from the prior payload.

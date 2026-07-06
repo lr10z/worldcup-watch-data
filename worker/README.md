@@ -25,7 +25,7 @@ Response shape (all timestamps in UTC seconds):
 
 - `lastFetchedUtc` — when the Worker last successfully polled api-football. Used by the watch's freshness gate (20 min).
 - `apiQuotaRemaining` — api-football daily quota remaining (free tier starts at 100). Only present when the most recent cron tick actually hit upstream; absent during idle periods. Used by the health-check workflow to alert.
-- `matches` — keyed by FIFA match number. Each entry has a `state` from the fixed set above; `asOfUtc` is only set on `fulltime` and is preserved across cron ticks so the watch's 10-min FT-grace timer stays anchored to the original FT moment.
+- `matches` — keyed by FIFA match number. Each entry has a `state` from the fixed set above; `asOfUtc` is only set on `fulltime` and is preserved across cron ticks so the watch's 5-min FT-grace timer stays anchored to the original FT moment.
 
 ## Architecture
 
