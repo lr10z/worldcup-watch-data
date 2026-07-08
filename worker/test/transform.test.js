@@ -470,6 +470,19 @@ test("mergeWithPrevious: transition FT → PST re-stamps asOfUtc (state change)"
   assert.deepEqual(merged, { "92": { state: "postponed", asOfUtc: NOW } });
 });
 
+test("mergeWithPrevious: transition PST → FT stamps current now (anti-resurrection skipped)", () => {
+  // Pins the direction the "FT → PST" test doesn't cover: FT's anti-
+  // resurrection guard fires ONLY on `!prev`. When prev exists as PST and
+  // fresh is FT, the guard doesn't fire (prev is truthy), and the merge
+  // stamps asOfUtc = now for the FT entry. Guards against a future edit
+  // that tightens the guard to `prev.state !== "fulltime"` and silently
+  // drops legitimate live→FT-via-PST paths.
+  const prev = { "92": { state: "postponed", asOfUtc: NOW - 20 * 60 } };
+  const fresh = { "92": { state: "fulltime" } };
+  const merged = mergeWithPrevious(fresh, prev, NOW);
+  assert.deepEqual(merged, { "92": { state: "fulltime", asOfUtc: NOW } });
+});
+
 test("filterForPayload: fresh postponed (window not expired) passes through", () => {
   const matches = { "92": { state: "postponed", asOfUtc: NOW - 20 * 60 } };   // 20 min ago
   const filtered = filterForPayload(matches, NOW);
@@ -544,6 +557,16 @@ test("buildStatusEntry: NS with kickoff older than POST_KICKOFF_S is dropped", (
   const fx = fxWithDate("NS", "2026-07-01T13:00:00+00:00", null);
   const nowFiveHoursLater = Math.floor(Date.parse("2026-07-01T18:00:00+00:00") / 1000);
   assert.equal(buildStatusEntry(fx, nowFiveHoursLater), null);
+});
+
+test("buildStatusEntry: NS at exact polling-window boundary still included", () => {
+  // Mirror of the FT / PST boundary tests. Guard is `now - kickoff >
+  // POST_KICKOFF_S`, so an equal delta passes. Prevents a future refactor
+  // of isStalePostKickoff from silently regressing NS.
+  const kickoffSec = Math.floor(Date.parse("2026-07-01T16:00:00+00:00") / 1000);
+  const nowAtBoundary = kickoffSec + POST_KICKOFF_S;
+  const fx = fxWithDate("NS", "2026-07-01T16:00:00+00:00", null);
+  assert.deepEqual(buildStatusEntry(fx, nowAtBoundary), { state: "notstarted" });
 });
 
 test("buildStatusEntry: NS with missing fixture.date is dropped", () => {
@@ -734,6 +757,55 @@ test("integration: mid-match live → PST stamps at transition, not at kickoff",
     FIVE_MIN_LATER
   );
   assert.deepEqual(kv, { "99": { state: "postponed", asOfUtc: TRANSITION } });
+});
+
+test("integration: NS cold-start ships and preserves asOfUtc across ticks", () => {
+  // Mirror of the PST cold-start integration. Match has kicked off but
+  // api-football hasn't flipped from NS to 1H yet (real 20-min delays are
+  // routine). Under v1.0.7's simpler design, NS behaves the same as PST:
+  // no anti-resurrection guard, filterForPayload doesn't age it out, watch
+  // enforces the 60-min display cap against a stable asOfUtc.
+  //
+  // The `KICKOFF` epoch here is deliberately in the future — buildStatusEntry
+  // gates NS on `now >= kickoff` at the source, but this integration test
+  // runs against mergeWithPrevious + filterForPayload directly (both are
+  // state-agnostic beyond the STATES_WITH_ASOFUTC / GRACE_BY_STATE table),
+  // so we can pin the loop behavior without going through the whole fetch
+  // pipeline.
+  const KICKOFF = 4_000_000;
+  const FIRST_NS = KICKOFF;                       // moment of scheduled kickoff
+  const IN_WINDOW = FIRST_NS + 15 * 60;           // 15 min in — still fresh
+  const HOURS_LATER = FIRST_NS + 3 * 60 * 60;     // past the display window
+
+  // Tick 1 — first NS sighting. No prev. Cold-start stamp.
+  let kv = filterForPayload(
+    mergeWithPrevious({ "88": { state: "notstarted" } }, {}, FIRST_NS),
+    FIRST_NS
+  );
+  assert.deepEqual(kv, { "88": { state: "notstarted", asOfUtc: FIRST_NS } },
+    "cold-start NS must ship immediately with asOfUtc = first sighting");
+
+  // Tick 2 — 1 min later. asOfUtc preserved.
+  kv = filterForPayload(
+    mergeWithPrevious({ "88": { state: "notstarted" } }, kv, FIRST_NS + 60),
+    FIRST_NS + 60
+  );
+  assert.deepEqual(kv, { "88": { state: "notstarted", asOfUtc: FIRST_NS } });
+
+  // Tick 3 — 15 min in. Still fresh, asOfUtc preserved.
+  kv = filterForPayload(
+    mergeWithPrevious({ "88": { state: "notstarted" } }, kv, IN_WINDOW),
+    IN_WINDOW
+  );
+  assert.deepEqual(kv, { "88": { state: "notstarted", asOfUtc: FIRST_NS } });
+
+  // Tick 4 — hours later. Payload STILL has the entry with the ORIGINAL
+  // asOfUtc. Watch has long since rolled off but Worker keeps shipping.
+  kv = filterForPayload(
+    mergeWithPrevious({ "88": { state: "notstarted" } }, kv, HOURS_LATER),
+    HOURS_LATER
+  );
+  assert.deepEqual(kv, { "88": { state: "notstarted", asOfUtc: FIRST_NS } });
 });
 
 
