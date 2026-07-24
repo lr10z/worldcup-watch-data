@@ -1,3 +1,7 @@
+# Retired July 2026
+
+The 2026 tournament is complete and this project's backend has been decommissioned — scheduled jobs disabled, Cloudflare Worker and KV storage deleted. The companion watch face, "World Cup 2026 Tracker," remains published on the Garmin Connect IQ Store. This repository is kept as an archived reference.
+
 # worldcup-watch-data
 
 Match data feeds for the World Cup 2026 Garmin watch face.
